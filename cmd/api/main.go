@@ -1,0 +1,76 @@
+// @title           URL Shortener API
+// @version         1.0
+// @description     Simple URL shortener service
+// @host            localhost:8080
+// @BasePath        /
+package main
+
+import (
+	_ "github.com/Tigr195/url-shortener/docs"
+	"github.com/Tigr195/url-shortener/internal/logger"
+	httpSwagger "github.com/swaggo/http-swagger"
+	"net/http"
+	"os"
+
+	"github.com/Tigr195/url-shortener/internal/handler"
+	"github.com/Tigr195/url-shortener/internal/repository"
+	"github.com/Tigr195/url-shortener/internal/service"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
+)
+
+func main() {
+	// Logger
+	log := logger.New()
+
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbSSLMode := os.Getenv("DB_SSLMODE")
+	appPort := os.Getenv("APP_PORT")
+	baseURL := os.Getenv("BASE_URL")
+
+	// Database
+	dsn := "host=" + dbHost +
+		" port=" + dbPort +
+		" dbname=" + dbName +
+		" user=" + dbUser +
+		" password=" + dbPassword +
+		" sslmode=" + dbSSLMode
+
+	db, err := sqlx.Connect("postgres", dsn)
+	if err != nil {
+		log.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	log.Info("connected to database")
+
+	// Layers
+	urlRepo := repository.NewURLRepository(db)
+	urlService := service.NewURLService(urlRepo, baseURL)
+	urlHandler := handler.NewURLHandler(urlService, log)
+
+	// Router
+	r := chi.NewRouter()
+
+	r.Use(handler.LoggerMiddleware(log))
+	r.Use(middleware.Recoverer)
+
+	r.Post("/api/shorten", urlHandler.Shorten)
+	r.Get("/{code}", urlHandler.Redirect)
+	r.Get("/swagger/*", httpSwagger.WrapHandler)
+	r.Handle("/*", http.FileServer(http.Dir("./frontend")))
+
+	// Start
+	log.Info("starting server", "port", appPort)
+	if err := http.ListenAndServe(":"+appPort, r); err != nil {
+		log.Error("server error", "error", err)
+		os.Exit(1)
+	}
+}
