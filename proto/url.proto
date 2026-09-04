@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package url;
+
+option go_package = "github.com/Tigr195/url-shortener/gen/url";
+
+service URLShortener {
+  rpc Shorten(ShortenRequest) returns (ShortenResponse);
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+}
+
+message ShortenRequest {
+  string url = 1;
+}
+
+message ShortenResponse {
+  string short_url = 1;
+  string original_url = 2;
+}
+
+message ResolveRequest {
+  string code = 1;
+}
+
+message ResolveResponse {
+  string original_url = 1;
+}

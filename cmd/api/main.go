@@ -9,9 +9,13 @@ import (
 	_ "github.com/Tigr195/url-shortener/docs"
 	"github.com/Tigr195/url-shortener/internal/logger"
 	httpSwagger "github.com/swaggo/http-swagger"
+	"google.golang.org/grpc"
+	"net"
 	"net/http"
 	"os"
 
+	urlpb "github.com/Tigr195/url-shortener/gen/url"
+	grpchandler "github.com/Tigr195/url-shortener/internal/grpc"
 	"github.com/Tigr195/url-shortener/internal/handler"
 	"github.com/Tigr195/url-shortener/internal/repository"
 	"github.com/Tigr195/url-shortener/internal/service"
@@ -33,6 +37,7 @@ func main() {
 	dbSSLMode := os.Getenv("DB_SSLMODE")
 	appPort := os.Getenv("APP_PORT")
 	baseURL := os.Getenv("BASE_URL")
+	grpcPort := os.Getenv("GRPC_PORT")
 
 	// Database
 	dsn := "host=" + dbHost +
@@ -55,6 +60,24 @@ func main() {
 	urlRepo := repository.NewURLRepository(db)
 	urlService := service.NewURLService(urlRepo, baseURL)
 	urlHandler := handler.NewURLHandler(urlService, log)
+
+	// gRPC server
+	go func() {
+		lis, err := net.Listen("tcp", ":"+grpcPort)
+		if err != nil {
+			log.Error("failed to listen grpc", "error", err)
+			os.Exit(1)
+		}
+
+		grpcServer := grpc.NewServer()
+		urlpb.RegisterURLShortenerServer(grpcServer, grpchandler.NewURLGRPCServer(urlService))
+
+		log.Info("starting gRPC server", "port", grpcPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Error("grpc server error", "error", err)
+			os.Exit(1)
+		}
+	}()
 
 	// Router
 	r := chi.NewRouter()
