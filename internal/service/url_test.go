@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// мок репозитория
 type mockURLRepository struct {
 	mock.Mock
 }
@@ -42,15 +41,35 @@ func (m *mockURLRepository) IncrementClicks(ctx context.Context, code string) er
 	return args.Error(0)
 }
 
+type mockURLCache struct {
+	mock.Mock
+}
+
+func (m *mockURLCache) Get(ctx context.Context, code string) (*model.URL, error) {
+	args := m.Called(ctx, code)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.URL), args.Error(1)
+}
+
+func (m *mockURLCache) Set(ctx context.Context, url *model.URL) error {
+	args := m.Called(ctx, url)
+	return args.Error(0)
+}
+
 func TestShorten_NewURL(t *testing.T) {
 	repo := new(mockURLRepository)
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
 
-	// URL ещё не существует в БД
 	repo.On("GetByOriginalURL", mock.Anything, "https://google.com").
 		Return(nil, errors.New("not found"))
 
 	repo.On("Save", mock.Anything, mock.AnythingOfType("*model.URL")).
+		Return(nil)
+
+	cache.On("Set", mock.Anything, mock.AnythingOfType("*model.URL")).
 		Return(nil)
 
 	resp, err := svc.Shorten(context.Background(), "https://google.com")
@@ -63,16 +82,19 @@ func TestShorten_NewURL(t *testing.T) {
 
 func TestShorten_ExistingURL(t *testing.T) {
 	repo := new(mockURLRepository)
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
 
 	existing := &model.URL{
 		ShortCode:   "abc123",
 		OriginalURL: "https://google.com",
 	}
 
-	// URL уже есть в БД
 	repo.On("GetByOriginalURL", mock.Anything, "https://google.com").
 		Return(existing, nil)
+
+	cache.On("Set", mock.Anything, mock.AnythingOfType("*model.URL")).
+		Return(nil)
 
 	resp, err := svc.Shorten(context.Background(), "https://google.com")
 
@@ -84,7 +106,8 @@ func TestShorten_ExistingURL(t *testing.T) {
 
 func TestShorten_EmptyURL(t *testing.T) {
 	repo := new(mockURLRepository)
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
 
 	repo.On("GetByOriginalURL", mock.Anything, "").
 		Return(nil, errors.New("not found"))
@@ -97,17 +120,48 @@ func TestShorten_EmptyURL(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestResolve_Found(t *testing.T) {
+func TestResolve_CacheHit(t *testing.T) {
 	repo := new(mockURLRepository)
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
 
 	expected := &model.URL{
 		ShortCode:   "abc123",
 		OriginalURL: "https://google.com",
 	}
 
+	cache.On("Get", mock.Anything, "abc123").
+		Return(expected, nil)
+
+	repo.On("IncrementClicks", mock.Anything, "abc123").
+		Return(nil)
+
+	url, err := svc.Resolve(context.Background(), "abc123")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "https://google.com", url.OriginalURL)
+	repo.AssertNotCalled(t, "GetByShortCode")
+}
+
+func TestResolve_CacheMiss(t *testing.T) {
+	repo := new(mockURLRepository)
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
+
+	expected := &model.URL{
+		ShortCode:   "abc123",
+		OriginalURL: "https://google.com",
+	}
+
+	// кэша нет — идём в БД
+	cache.On("Get", mock.Anything, "abc123").
+		Return(nil, errors.New("cache miss"))
+
 	repo.On("GetByShortCode", mock.Anything, "abc123").
 		Return(expected, nil)
+
+	cache.On("Set", mock.Anything, mock.AnythingOfType("*model.URL")).
+		Return(nil)
 
 	repo.On("IncrementClicks", mock.Anything, "abc123").
 		Return(nil)
@@ -120,7 +174,11 @@ func TestResolve_Found(t *testing.T) {
 
 func TestResolve_NotFound(t *testing.T) {
 	repo := new(mockURLRepository)
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
+
+	cache.On("Get", mock.Anything, "notexist").
+		Return(nil, errors.New("cache miss"))
 
 	repo.On("GetByShortCode", mock.Anything, "notexist").
 		Return(nil, errors.New("not found"))
@@ -132,7 +190,8 @@ func TestResolve_NotFound(t *testing.T) {
 
 func TestShorten_SaveError(t *testing.T) {
 	repo := new(mockURLRepository)
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	cache := new(mockURLCache)
+	svc := service.NewURLService(repo, cache, "http://localhost:8080")
 
 	repo.On("GetByOriginalURL", mock.Anything, "https://google.com").
 		Return(nil, errors.New("not found"))
