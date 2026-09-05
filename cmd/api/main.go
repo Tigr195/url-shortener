@@ -7,7 +7,9 @@ package main
 
 import (
 	_ "github.com/Tigr195/url-shortener/docs"
+	"github.com/Tigr195/url-shortener/internal/cache"
 	"github.com/Tigr195/url-shortener/internal/logger"
+	"github.com/redis/go-redis/v9"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"google.golang.org/grpc"
 	"net"
@@ -38,6 +40,8 @@ func main() {
 	appPort := os.Getenv("APP_PORT")
 	baseURL := os.Getenv("BASE_URL")
 	grpcPort := os.Getenv("GRPC_PORT")
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := os.Getenv("REDIS_PORT")
 
 	// Database
 	dsn := "host=" + dbHost +
@@ -56,9 +60,17 @@ func main() {
 
 	log.Info("connected to database")
 
+	// Redis
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: redisHost + ":" + redisPort,
+	})
+	defer redisClient.Close()
+	log.Info("connected to redis")
+
 	// Layers
 	urlRepo := repository.NewURLRepository(db)
-	urlService := service.NewURLService(urlRepo, baseURL)
+	urlCache := cache.NewURLCache(redisClient)
+	urlService := service.NewURLService(urlRepo, urlCache, baseURL)
 	urlHandler := handler.NewURLHandler(urlService, log)
 
 	// gRPC server
