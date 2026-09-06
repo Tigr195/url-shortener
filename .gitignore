@@ -5,3 +5,4 @@ bin/
 logs/
 CONTEXT.md
 tests/**/*.json
+k8s/secret.yaml

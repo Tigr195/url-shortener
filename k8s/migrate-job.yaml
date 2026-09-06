@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: url-shortener-migrate
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          image: migrate/migrate
+          args:
+            - "-path=/migrations"
+            - "-database=postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/$(DB_NAME)?sslmode=disable"
+            - "up"
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: url-shortener-secret
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: url-shortener-secret
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: url-shortener-config
+                  key: DB_NAME
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-config
+      restartPolicy: Never
