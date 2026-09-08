@@ -12,7 +12,7 @@ COPY . .
 RUN swag init -g cmd/api/main.go
 RUN go build -o bin/api ./cmd/api
 
-FROM alpine:latest
+FROM alpine:3.22
 
 WORKDIR /app
 
