@@ -23,7 +23,7 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -38,5 +38,5 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: true
+          push: false
           tags: tikushka/url-shortener:latest
